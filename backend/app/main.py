@@ -61,6 +61,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Standard root and healthz endpoints for cloud hosting (Render / K8s)
+@app.get("/healthz", include_in_schema=False)
+def render_healthz():
+    return {"status": "ok"}
+
 # Register API Routers
 app.include_router(health.router, prefix=settings.API_PREFIX)
 app.include_router(zoning.router, prefix=settings.API_PREFIX)
