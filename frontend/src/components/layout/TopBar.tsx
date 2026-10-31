@@ -3,6 +3,7 @@ import { generatePDFReport } from '../../services/pdfExport';
 
 export function TopBar() {
   const isDemoMode = useSiteStore((s) => s.isDemoMode);
+  const backendOnline = useSiteStore((s) => s.backendOnline);
   const site = useSiteStore((s) => s.site);
   const zoning = useSiteStore((s) => s.zoning);
   const building = useSiteStore((s) => s.building);
@@ -31,7 +32,27 @@ export function TopBar() {
       <div className="topbar-center">
         <span className="topbar-jurisdiction">Hyderabad, Telangana</span>
         <span className="topbar-badge">PRELIMINARY ANALYSIS</span>
-        {isDemoMode && <span className="topbar-demo">DEMO MODE</span>}
+        {backendOnline ? (
+          <span
+            style={{
+              fontSize: 10,
+              color: '#3DD68C',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: '12px',
+              background: 'rgba(61, 214, 140, 0.1)',
+              border: '1px solid rgba(61, 214, 140, 0.25)',
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3DD68C', display: 'inline-block' }}></span>
+            API ONLINE
+          </span>
+        ) : (
+          isDemoMode && <span className="topbar-demo">LOCAL MODE</span>
+        )}
       </div>
 
       <div className="topbar-actions">

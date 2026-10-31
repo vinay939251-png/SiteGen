@@ -18,6 +18,7 @@ import type {
 import { getZoningRules } from '../engine/zoning';
 import { calculateFeasibility, generateIndicators } from '../engine/feasibility';
 import type { FeasibilityIndicator } from '../types';
+import { api } from '../services/api';
 
 /** Load saved scenarios from localStorage */
 const loadStoredScenarios = (): SavedScenario[] => {
@@ -89,6 +90,7 @@ interface SiteStore {
   bottomExpanded: boolean;
   isDemoMode: boolean;
   isScenarioModalOpen: boolean;
+  backendOnline: boolean;
 
   // Actions
   setSite: (site: Partial<Site>) => void;
@@ -149,6 +151,7 @@ export const useSiteStore = create<SiteStore>((set, get) => ({
   bottomExpanded: false,
   isDemoMode: true,
   isScenarioModalOpen: false,
+  backendOnline: false,
 
   // Actions
   setSite: (partial) => {
@@ -257,6 +260,8 @@ export const useSiteStore = create<SiteStore>((set, get) => ({
     } catch {
       // Ignore quota errors
     }
+    // Async sync to backend
+    api.saveScenario(newScenario).catch(() => {});
   },
 
   loadScenario: (id) => {
@@ -282,6 +287,8 @@ export const useSiteStore = create<SiteStore>((set, get) => ({
     } catch {
       // Ignore
     }
+    // Async delete from backend
+    api.deleteScenario(id).catch(() => {});
   },
 
   recalculate: () => {
@@ -292,7 +299,50 @@ export const useSiteStore = create<SiteStore>((set, get) => ({
   },
 }));
 
-// Initial calculation
-setTimeout(() => {
+// Initial calculation and backend sync
+setTimeout(async () => {
   useSiteStore.getState().recalculate();
+  
+  // Probe backend
+  const health = await api.checkHealth();
+  if (health) {
+    useSiteStore.setState({ backendOnline: true });
+    // Pull any backend scenarios and merge
+    try {
+      const backendScens = await api.getScenarios();
+      if (backendScens && backendScens.length > 0) {
+        const local = useSiteStore.getState().scenarios;
+        const mergedMap = new Map();
+        local.forEach((s) => mergedMap.set(s.id, s));
+        backendScens.forEach((bs: any) => {
+          if (!mergedMap.has(bs.id)) {
+            mergedMap.set(bs.id, {
+              id: bs.id,
+              name: bs.name,
+              timestamp: new Date(bs.created_at).getTime(),
+              site: bs.site_snapshot || useSiteStore.getState().site,
+              building: {
+                typology: bs.typology,
+                floors: bs.floors,
+                floorHeight: bs.floor_height,
+                targetFAR: bs.target_far,
+                efficiency: bs.efficiency,
+              },
+              finance: {
+                landCost: bs.land_cost,
+                constructionCostPerSqft: bs.construction_cost_per_sqft,
+                sellingPricePerSqft: bs.selling_price_per_sqft,
+                additionalCostPercent: bs.additional_cost_percent,
+                parkingCostPerSpace: 200000,
+              },
+              feasibility: bs.feasibility_result,
+            });
+          }
+        });
+        useSiteStore.setState({ scenarios: Array.from(mergedMap.values()) });
+      }
+    } catch {
+      // Ignore background sync errors
+    }
+  }
 }, 0);
