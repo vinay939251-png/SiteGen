@@ -81,3 +81,4 @@ if os.path.exists(static_dist) and os.path.exists(os.path.join(static_dist, "ind
         if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
             return FileResponse(file_path)
         return FileResponse(os.path.join(static_dist, "index.html"))
+

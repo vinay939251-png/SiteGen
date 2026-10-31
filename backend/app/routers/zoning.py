@@ -32,3 +32,4 @@ def get_road_rules_table():
         "authority": "GHMC / HMDA",
         "road_rules": HYDERABAD_ROAD_RULES,
     }
+

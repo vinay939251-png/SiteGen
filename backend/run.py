@@ -13,3 +13,4 @@ if __name__ == "__main__":
     print(f"Starting SiteGen Backend API on http://{host}:{port}")
     print(f"Interactive API Docs available at: http://localhost:{port}/docs")
     uvicorn.run("backend.app.main:app", host=host, port=port, reload=False)
+

@@ -51,3 +51,4 @@ def delete_scenario(scen_id: str, db: Session = Depends(get_db)):
     db.delete(scen)
     db.commit()
     return None
+

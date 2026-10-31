@@ -11,3 +11,4 @@ def health_check():
         "version": settings.VERSION,
         "jurisdiction": "Hyderabad (GHMC / HMDA)",
     }
+

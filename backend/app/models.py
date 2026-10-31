@@ -74,3 +74,4 @@ class ScenarioModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     site = relationship("SiteModel", back_populates="scenarios")
+

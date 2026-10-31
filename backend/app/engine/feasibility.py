@@ -157,3 +157,4 @@ def calculate_feasibility(
         "roi_percent": round(roi_percent, 2),
         "indicators": indicators,
     }
+

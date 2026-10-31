@@ -46,3 +46,4 @@ def compute_feasibility(payload: CalculateFeasibilityRequest, db: Session = Depe
         parking_cost_per_space=payload.parking_cost_per_space,
     )
     return CalculateFeasibilityResponse(**result)
+

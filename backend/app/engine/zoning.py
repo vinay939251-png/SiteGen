@@ -48,3 +48,4 @@ def get_zoning_rules(jurisdiction: str = "Hyderabad", road_width: float = 30.0) 
         "max_far": rule["max_far"],
     })
     return base
+

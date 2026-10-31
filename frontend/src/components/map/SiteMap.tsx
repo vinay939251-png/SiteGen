@@ -4,6 +4,7 @@ import {
   MapContainer,
   TileLayer,
   Polygon,
+  Polyline,
   Rectangle,
   Marker,
   Popup,
@@ -15,6 +16,7 @@ import 'leaflet/dist/leaflet.css';
 import { useSiteStore } from '../../store/siteStore';
 import { calculateArea, calculatePerimeter, calculateDimensions, sqftToSqm } from '../../engine/geometry';
 import { resolveMicroMarket } from '../../engine/neighborhoodContext';
+import { api } from '../../services/api';
 
 // Fix Leaflet default icon URLs
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -68,28 +70,46 @@ const centerAnchorIcon = L.divIcon({
   iconAnchor: [12, 12],
 });
 
+// Custom intermediate drawing vertex icon (sleek 12px glowing cyan dot)
+const drawVertexIcon = L.divIcon({
+  className: 'custom-draw-vertex',
+  html: `<div style="
+    width: 12px;
+    height: 12px;
+    background: #4C9EEB;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(76,158,235,0.9);
+    margin-left: -6px;
+    margin-top: -6px;
+    pointer-events: none;
+  "></div>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+});
+
 // Custom start vertex icon for closing polygon loop
 const firstVertexIcon = L.divIcon({
   className: 'custom-first-vertex',
   html: `<div style="
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     background: #E8A838;
     border: 2px solid #ffffff;
     border-radius: 50%;
-    box-shadow: 0 0 12px rgba(232,168,56,0.9);
+    box-shadow: 0 0 14px rgba(232,168,56,1);
     cursor: pointer;
-    margin-left: -9px;
-    margin-top: -9px;
+    margin-left: -11px;
+    margin-top: -11px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 8px;
+    font-size: 11px;
     color: #000;
-    font-weight: bold;
+    font-weight: 800;
   ">1</div>`,
-  iconSize: [18, 18],
-  iconAnchor: [9, 9],
+  iconSize: [22, 22],
+  iconAnchor: [11, 11],
 });
 
 /** Famous Hyderabad Development Hotspots */
@@ -335,27 +355,96 @@ function BoxDragSelector({
 /** Point-by-point polygon drawing & double-click to finish handler */
 function PolygonDrawHandler({
   isDrawing,
+  drawnPoints,
   onAddPoint,
   onComplete,
 }: {
   isDrawing: boolean;
+  drawnPoints: [number, number][];
   onAddPoint: (latlng: L.LatLng) => void;
   onComplete: () => void;
 }) {
+  const map = useMap();
+  const [mousePos, setMousePos] = useState<[number, number] | null>(null);
+
+  useEffect(() => {
+    if (!map || !isDrawing) {
+      setMousePos(null);
+      return;
+    }
+    map.doubleClickZoom.disable();
+    const container = map.getContainer();
+    const prevCursor = container.style.cursor;
+    container.style.cursor = 'crosshair';
+
+    return () => {
+      map.doubleClickZoom.enable();
+      container.style.cursor = prevCursor;
+    };
+  }, [map, isDrawing]);
+
   useMapEvents({
-    click(e) {
-      if (isDrawing) {
-        onAddPoint(e.latlng);
+    mousemove(e) {
+      if (isDrawing && drawnPoints.length > 0) {
+        setMousePos([e.latlng.lat, e.latlng.lng]);
       }
     },
+    click(e) {
+      if (!isDrawing) return;
+      const original = e.originalEvent as MouseEvent;
+      const target = original?.target as HTMLElement;
+      if (
+        target?.closest?.('.map-overlay-controls') ||
+        target?.closest?.('.map-floating-confirm') ||
+        target?.closest?.('button')
+      ) {
+        return;
+      }
+
+      // Check if clicking near first vertex to close loop
+      if (drawnPoints.length >= 3) {
+        const first = drawnPoints[0];
+        const dist = Math.hypot(e.latlng.lat - first[0], e.latlng.lng - first[1]);
+        if (dist < 0.00015) {
+          onComplete();
+          return;
+        }
+      }
+
+      // Avoid duplicate click at same spot
+      if (drawnPoints.length > 0) {
+        const last = drawnPoints[drawnPoints.length - 1];
+        const dist = Math.hypot(e.latlng.lat - last[0], e.latlng.lng - last[1]);
+        if (dist < 0.00003) {
+          return;
+        }
+      }
+
+      onAddPoint(e.latlng);
+    },
     dblclick(e) {
-      if (isDrawing) {
+      if (isDrawing && drawnPoints.length >= 3) {
         e.originalEvent.preventDefault();
+        e.originalEvent.stopPropagation();
         onComplete();
       }
     },
   });
-  return null;
+
+  if (!isDrawing || drawnPoints.length === 0 || !mousePos) return null;
+
+  const lastPoint = drawnPoints[drawnPoints.length - 1];
+  return (
+    <Polyline
+      positions={[lastPoint, mousePos]}
+      pathOptions={{
+        color: '#E8A838',
+        weight: 2,
+        dashArray: '4 4',
+        opacity: 0.85,
+      }}
+    />
+  );
 }
 
 /** Click on map to place plot handler */
@@ -486,8 +575,7 @@ export function SiteMap() {
       const market = resolveMicroMarket({ lat: centerLat, lng: centerLng });
       const plotAddress = `${market.name} — Polygon Site (${width} × ${depth} ft)`;
 
-      // 3. Update both site coordinates AND boundary
-      setSite({
+      const newSiteData = {
         boundary: localBoundary,
         coordinates: { lat: centerLat, lng: centerLng },
         address: plotAddress,
@@ -496,12 +584,26 @@ export function SiteMap() {
         areaSqm,
         perimeter,
         dimensions: { width, depth },
-      });
+      };
+
+      // 3. Update both site coordinates AND boundary
+      setSite(newSiteData);
       setIsSelected(true);
+
+      // Async save to backend database
+      api.saveSite({
+        ...newSiteData,
+        roadWidth: site.roadWidth,
+        landPriceTotal: site.landPriceTotal,
+      } as any).catch(() => {});
     }
     setDrawnPoints([]);
     setMode('READY');
   }, [drawnPoints, setSite]);
+
+  const handleUndoPolygonPoint = () => {
+    setDrawnPoints((prev) => prev.slice(0, -1));
+  };
 
   const handleCancelPolygon = () => {
     setDrawnPoints([]);
@@ -634,6 +736,7 @@ export function SiteMap() {
         {/* Point-by-point Polygon Draw Handler */}
         <PolygonDrawHandler
           isDrawing={mode === 'POLYGON_DRAW'}
+          drawnPoints={drawnPoints}
           onAddPoint={handleAddPolygonPoint}
           onComplete={handleConfirmPolygon}
         />
@@ -701,28 +804,44 @@ export function SiteMap() {
           />
         )}
 
-        {/* Live points during Polygon Draw mode */}
+        {/* Live points & polygon preview during Polygon Draw mode */}
         {mode === 'POLYGON_DRAW' && drawnPoints.length > 0 && (
           <>
-            <Polygon
-              positions={drawnPoints}
-              pathOptions={{
-                color: '#4C9EEB',
-                weight: 2.5,
-                fillColor: '#4C9EEB',
-                fillOpacity: 0.2,
-                dashArray: '4 4',
-              }}
-            />
+            {drawnPoints.length >= 3 ? (
+              <Polygon
+                positions={drawnPoints}
+                pathOptions={{
+                  color: '#4C9EEB',
+                  weight: 2.5,
+                  fillColor: '#4C9EEB',
+                  fillOpacity: 0.22,
+                  dashArray: '4 4',
+                }}
+              />
+            ) : drawnPoints.length === 2 ? (
+              <Polyline
+                positions={drawnPoints}
+                pathOptions={{
+                  color: '#4C9EEB',
+                  weight: 2.5,
+                  dashArray: '4 4',
+                }}
+              />
+            ) : null}
+
             {drawnPoints.map((pos, i) => (
               <Marker
                 key={`draw-pt-${i}`}
                 position={pos}
-                icon={i === 0 ? firstVertexIcon : undefined}
+                icon={i === 0 ? firstVertexIcon : drawVertexIcon}
+                interactive={i === 0}
                 eventHandlers={
                   i === 0 && drawnPoints.length >= 3
                     ? {
-                        click: handleConfirmPolygon,
+                        click: (e) => {
+                          L.DomEvent.stopPropagation(e);
+                          handleConfirmPolygon();
+                        },
                       }
                     : undefined
                 }
@@ -838,7 +957,7 @@ export function SiteMap() {
             alignItems: 'center',
             gap: 10,
             background: 'rgba(10, 14, 20, 0.96)',
-            padding: '8px 16px',
+            padding: '8px 18px',
             borderRadius: 30,
             border: '1px solid rgba(76, 158, 235, 0.5)',
             boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
@@ -846,9 +965,24 @@ export function SiteMap() {
         >
           <span style={{ fontSize: 12, color: '#f0f2f5', fontWeight: 500 }}>
             {drawnPoints.length === 0
-              ? 'Click points on the map to outline your parcel'
-              : `${drawnPoints.length} points placed. Double-click or click starting point to finish.`}
+              ? 'Click map to place 1st vertex'
+              : drawnPoints.length < 3
+              ? `Point ${drawnPoints.length} placed — click map to add more points (min 3)`
+              : `${drawnPoints.length} points placed — click Point 1 or double-click to finish`}
           </span>
+
+          {drawnPoints.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{ padding: '4px 10px', borderRadius: 20, fontSize: 11 }}
+              onClick={handleUndoPolygonPoint}
+              title="Remove the last placed vertex"
+            >
+              ↶ Undo
+            </button>
+          )}
+
           <button
             type="button"
             className="btn btn-sm btn-primary"
@@ -856,7 +990,7 @@ export function SiteMap() {
             onClick={handleConfirmPolygon}
             disabled={drawnPoints.length < 3}
           >
-            ✓ Confirm & Select Site
+            ✓ Complete Polygon ({drawnPoints.length})
           </button>
           <button
             type="button"
